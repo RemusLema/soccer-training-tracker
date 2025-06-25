@@ -1,0 +1,6 @@
+streamlit
+pandas
+altair
+matplotlib
+streamlit-calendar
+fpdf

@@ -1,0 +1,135 @@
+import streamlit as st
+import pandas as pd
+from datetime import date, datetime
+import matplotlib.pyplot as plt
+import altair as alt
+from streamlit_calendar import calendar
+
+USE_SHEETS = False  # Set to True if using Google Sheets
+
+# Load data
+if USE_SHEETS:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+    # Add your Google Sheets logic if needed
+else:
+    try:
+        data = pd.read_csv('training_log.csv', parse_dates=['date'])
+    except FileNotFoundError:
+        data = pd.DataFrame(columns=[
+            'date','week','day','session_type','exercise',
+            'sets','reps','weight','rpe','notes'
+        ])
+
+    try:
+        goals = pd.read_csv('training_goals.csv')
+    except FileNotFoundError:
+        goals = pd.DataFrame(columns=['Goal','Target','Deadline','Completed'])
+
+# ---------- APP CONFIG ----------
+st.set_page_config(page_title="Soccer Tracker", layout="centered")
+st.markdown("<h1 style='text-align:center'>⚽ Soccer Training Tracker</h1>", unsafe_allow_html=True)
+
+# ---------- SIDEBAR ----------
+page = st.sidebar.radio("Go to", ["Log Session", "Calendar View", "Progress Charts", "Set Goals", "View Logs"])
+
+# ---------- PAGE: Log Session ----------
+if page == "Log Session":
+    week = st.selectbox("Week", [f"Week {i}" for i in range(1, 7)])
+    session_date = st.date_input("Date", date.today())
+    session_type = st.selectbox("Session Type", [
+        "Lower Body", "Upper Body", "Conditioning",
+        "Recovery/Mobility", "Power/Plyo", "Field Fitness"
+    ])
+    rpe = st.slider("RPE (1–10)", 1, 10, 5)
+    notes = st.text_area("Notes (soreness, fatigue, etc.)")
+
+    if session_type in ["Lower Body", "Upper Body", "Power/Plyo"]:
+        exercises = st.text_area("Exercises (one per line, e.g. Squat – 4x6 @ 100 lb)")
+        if st.button("Save Strength Session"):
+            for line in exercises.split("\n"):
+                data.loc[len(data)] = {
+                    'date': session_date, 'week': week, 'day': session_date.strftime("%A"),
+                    'session_type': session_type, 'exercise': line,
+                    'sets': '', 'reps': '', 'weight': '', 'rpe': rpe, 'notes': notes
+                }
+            data.to_csv('training_log.csv', index=False)
+            st.success("Session saved!")
+
+    elif session_type in ["Conditioning", "Field Fitness"]:
+        duration = st.text_input("Details (e.g. 6x20m sprints, 25-min jog)")
+        if st.button("Save Conditioning Session"):
+            data.loc[len(data)] = {
+                'date': session_date, 'week': week, 'day': session_date.strftime("%A"),
+                'session_type': session_type, 'exercise': duration,
+                'sets': '', 'reps': '', 'weight': '', 'rpe': rpe, 'notes': notes
+            }
+            data.to_csv('training_log.csv', index=False)
+            st.success("Workout saved!")
+
+    else:
+        if st.button("Save Recovery Session"):
+            data.loc[len(data)] = {
+                'date': session_date, 'week': week, 'day': session_date.strftime("%A"),
+                'session_type': session_type, 'exercise': '',
+                'sets': '', 'reps': '', 'weight': '', 'rpe': rpe, 'notes': notes
+            }
+            data.to_csv('training_log.csv', index=False)
+            st.success("Recovery logged!")
+
+# ---------- PAGE: Calendar ----------
+elif page == "Calendar View":
+    st.subheader("📅 Training Calendar")
+    if not data.empty:
+        cal_data = data[['date','session_type']].copy()
+        cal_data['title'] = cal_data['session_type']
+        cal_data['start'] = pd.to_datetime(cal_data['date'])
+        cal_data['end'] = cal_data['start']
+        cal_data['allDay'] = True
+        st.calendar("Your Training Sessions", events=cal_data.to_dict('records'))
+    else:
+        st.info("No sessions logged yet.")
+
+# ---------- PAGE: Charts ----------
+elif page == "Progress Charts":
+    st.subheader("📈 Progress Overview")
+    if not data.empty:
+        # Weekly session count
+        weekly = data.groupby(['week', 'session_type']).size().unstack(fill_value=0)
+        st.bar_chart(weekly)
+
+        # RPE trend
+        rpe_df = data.groupby('date')['rpe'].mean().reset_index()
+        rpe_chart = alt.Chart(rpe_df).mark_line(point=True).encode(
+            x='date:T', y='rpe:Q', tooltip=['date','rpe']
+        ).properties(title="Average RPE Over Time", height=300)
+        st.altair_chart(rpe_chart, use_container_width=True)
+    else:
+        st.info("Log some sessions to view progress.")
+
+# ---------- PAGE: Set Goals ----------
+elif page == "Set Goals":
+    st.subheader("🎯 Set Your Training Goals")
+    with st.form("goal_form"):
+        goal = st.text_input("Goal Description (e.g. Squat 100kg x 5)")
+        target = st.text_input("Target (e.g. 100kg x 5)")
+        deadline = st.date_input("Deadline")
+        submit = st.form_submit_button("Add Goal")
+        if submit:
+            goals.loc[len(goals)] = [goal, target, deadline, False]
+            goals.to_csv('training_goals.csv', index=False)
+            st.success("Goal added!")
+
+    if not goals.empty:
+        st.markdown("### 📌 Your Goals")
+        st.dataframe(goals)
+
+# ---------- PAGE: View Logs ----------
+elif page == "View Logs":
+    st.subheader("📋 All Logged Sessions")
+    if not data.empty:
+        st.dataframe(data.sort_values('date'), use_container_width=True)
+    else:
+        st.info("No sessions yet.")
+
+st.markdown("<br><br><sub style='font-size:10px'>Built with Streamlit — Powered by ⚽ and 💪</sub>", unsafe_allow_html=True)
